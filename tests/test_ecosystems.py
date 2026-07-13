@@ -69,6 +69,16 @@ class TestEcosystemsClassmethods:
         eco = Ecosystems.from_parquet("/path.parquet", ecosystem_column='ECO_NAME')
         assert isinstance(eco, EcosystemsGeoParquet)
 
+    def test_from_file_parquet_str(self):
+        eco = Ecosystems.from_file("/path.parquet", ecosystem_column='ECO_NAME')
+        assert isinstance(eco, EcosystemsGeoParquet)
+
+    def test_from_file_parquet_path(self):
+        # A pathlib.Path ending in .parquet must route to the GeoParquet
+        # backend, not the OGR-based EcosystemsFile.
+        eco = Ecosystems.from_file(Path("/path.parquet"), ecosystem_column='ECO_NAME')
+        assert isinstance(eco, EcosystemsGeoParquet)
+
     def test_from_cog(self):
         eco = Ecosystems.from_cog("/path.tif")
         assert isinstance(eco, EcosystemsCOG)
