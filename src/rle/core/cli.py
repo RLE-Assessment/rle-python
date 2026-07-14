@@ -1,7 +1,7 @@
 """Command-line interface for rle-python core."""
 
 import typer
-from typing_extensions import Annotated
+from typing import Annotated
 
 from rle.core import __version__
 
