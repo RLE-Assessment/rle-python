@@ -1,0 +1,41 @@
+version: 1
+project:
+  id: rle-python
+  title: rle-python
+  description: Core tools for IUCN Red List of Ecosystems (RLE) analysis with local and cloud data access.
+  keywords:
+    - IUCN
+    - Red List of Ecosystems
+    - RLE
+    - AOO
+    - EOO
+    - ecology
+    - biodiversity
+    - Python
+  github: https://github.com/RLE-Assessment/rle-python
+  license:
+    code: Apache-2.0
+  toc:
+    - file: index.md
+    - title: Getting started
+      children:
+        - file: installation.md
+        - file: quickstart.md
+    - title: Guides
+      children:
+        - file: ecosystems.md
+        - file: assessment.md
+        - file: ecosystem-codes.md
+        - file: cli-and-backends.md
+    - title: Reference
+      children:
+        - file: api.md
+    - title: About
+      children:
+        - file: concepts.md
+        - file: contributing.md
+site:
+  template: book-theme
+  options:
+    favicon: ""
+    logo_text: rle-python
