@@ -13,6 +13,9 @@ venv/
 
 # Tooling caches
 .pytest_cache/
+
+# MyST docs build output
+_build/
 .ruff_cache/
 .mypy_cache/
 .ipynb_checkpoints/
