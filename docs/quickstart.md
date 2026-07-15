@@ -23,6 +23,15 @@ eco = Ecosystems.from_file(
     "data/null_island.geojson",
     ecosystem_column="ECO_NAME",
 )
+```
+
+```{code-cell} python
+from rle.core import Ecosystems
+
+eco = Ecosystems.from_file(
+    "https://data.source.coop/tyler/colombia-ecosystems-map/ecosistemas/ECOSISTEMAS_MEC_122024_5records.parquet",
+    ecosystem_column="ecos_general",
+)
 eco
 ```
 
