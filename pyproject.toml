@@ -81,3 +81,30 @@ markers = [
     "unit: Unit tests (mocked, fast, no Earth Engine authentication required)",
     "integration: Integration tests (requires Earth Engine authentication, slower)",
 ]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "linux-64"]
+
+# Jupyter is what lets MyST execute the `{code-cell}` blocks in docs/.
+# ipykernel provides the `python3` kernel referenced by the page frontmatter;
+# jupyter-server is the server MyST connects to when run with `--execute`.
+[tool.pixi.dependencies]
+python = ">=3.11,<3.13"
+jupyter_server = "*"
+ipykernel = "*"
+requests = ">=2.34.2,<3"
+aiohttp = ">=3.14.1,<4"
+
+# Install this package (and its runtime deps from [project]) editable into the
+# pixi env so the docs kernel can `import rle`. The `viz` extra pulls in
+# lonboard + matplotlib so docs cells can render maps and plots.
+[tool.pixi.pypi-dependencies]
+rle-python = { path = ".", editable = true, extras = ["viz"] }
+
+[tool.pixi.tasks]
+# The MyST config (myst.yml) lives in docs/, so run the tasks from there.
+# Live preview with executed cells (http://localhost:3000 by default).
+docs = { cmd = "myst start --execute", cwd = "docs" }
+# One-shot build that executes cells; useful for CI and for verifying output.
+docs-build = { cmd = "myst build --execute --html", cwd = "docs" }
