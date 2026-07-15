@@ -317,3 +317,28 @@ class TestEcosystemsFunctionalGroupColumn:
                              functional_group_column='EFG1')
         limited = eco.limit(1)
         assert limited.functional_group_column == 'EFG1'
+
+
+@pytest.mark.unit
+class TestEcosystemsColumnValidation:
+    """A missing configured column should raise a clear error that lists the
+    available column names, instead of a bare pandas KeyError."""
+
+    def test_unique_ecosystems_missing_column_lists_available(self):
+        eco = EcosystemsFile(GEOJSON_PATH, ecosystem_column='NOPE')
+        with pytest.raises(ValueError) as excinfo:
+            eco.unique_ecosystems()
+        msg = str(excinfo.value)
+        assert 'NOPE' in msg                 # names the bad column
+        assert 'Available columns' in msg
+        assert 'ECO_CODE' in msg             # lists a real column
+
+    def test_unique_functional_groups_missing_column_lists_available(self):
+        eco = EcosystemsFile(GEOJSON_PATH, ecosystem_column='ECO_CODE',
+                             functional_group_column='NOPE')
+        with pytest.raises(ValueError) as excinfo:
+            eco.unique_functional_groups()
+        msg = str(excinfo.value)
+        assert 'NOPE' in msg
+        assert 'Available columns' in msg
+        assert 'EFG1' in msg

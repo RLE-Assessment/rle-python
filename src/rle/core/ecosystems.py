@@ -83,6 +83,20 @@ class Ecosystems(ABC):
             self._cached = self._load()
         return self._cached
 
+    def _require_column(self, data, column: str, role: str) -> None:
+        """Raise a clear error if a configured column is missing from the data.
+
+        Lists the available column names so the caller can pick a valid one.
+        A no-op for backends whose loaded object has no ``columns`` (e.g. rasters).
+        """
+        columns = getattr(data, "columns", None)
+        if columns is not None and column not in columns:
+            available = ", ".join(map(str, columns))
+            raise ValueError(
+                f"{role}={column!r} is not a column in the ecosystem data. "
+                f"Available columns: {available}"
+            )
+
     @property
     def geometry(self):
         """Return the geometry column of the loaded data."""
@@ -122,6 +136,7 @@ class Ecosystems(ABC):
             raise ValueError("ecosystem_column is not set")
         data = self.load()
         if hasattr(data, '__getitem__'):
+            self._require_column(data, self.ecosystem_column, "ecosystem_column")
             return sorted(data[self.ecosystem_column].unique(), key=_natural_key)
         raise NotImplementedError(
             f"unique_ecosystems not supported for {self.kind.value}"
@@ -133,6 +148,8 @@ class Ecosystems(ABC):
             raise ValueError("functional_group_column is not set")
         data = self.load()
         if hasattr(data, '__getitem__'):
+            self._require_column(data, self.functional_group_column,
+                                 "functional_group_column")
             return sorted(data[self.functional_group_column].unique(), key=_natural_key)
         raise NotImplementedError(
             f"unique_functional_groups not supported for {self.kind.value}"
@@ -148,6 +165,8 @@ class Ecosystems(ABC):
         if self.ecosystem_column is None:
             raise ValueError("ecosystem_column is not set")
         data = self.load()
+        self._require_column(data, self.ecosystem_column, "ecosystem_column")
+        self._require_column(data, self.ecosystem_name_column, "ecosystem_name_column")
         match = data.loc[data[self.ecosystem_column] == code, self.ecosystem_name_column]
         if match.empty:
             raise KeyError(f"Ecosystem code {code!r} not found")
@@ -163,6 +182,8 @@ class Ecosystems(ABC):
         if self.ecosystem_column is None:
             raise ValueError("ecosystem_column is not set")
         data = self.load()
+        self._require_column(data, self.ecosystem_column, "ecosystem_column")
+        self._require_column(data, self.ecosystem_name_column, "ecosystem_name_column")
         pairs = data.drop_duplicates(subset=self.ecosystem_column)
         mapping = dict(zip(
             pairs[self.ecosystem_column],
@@ -187,6 +208,7 @@ class Ecosystems(ABC):
             raise NotImplementedError(
                 f"filter not supported for {self.kind.value}"
             )
+        self._require_column(data, self.ecosystem_column, "ecosystem_column")
         if regex:
             mask = data[self.ecosystem_column].str.match(pattern)
         else:
