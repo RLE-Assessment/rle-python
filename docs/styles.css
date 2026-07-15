@@ -1,0 +1,45 @@
+/* Custom styling for the rle-python docs (MyST book-theme).
+ *
+ * Goal: make executed cell *outputs* visually distinct from the *code* that
+ * produced them. Input code cells already ship with a blue left border; here we
+ * give outputs their own "result panel" look — a slate left accent, a faint
+ * tinted background, and an "Output" label — so the two never blur together.
+ */
+
+[data-name="outputs-container"] {
+  margin-top: 0.5rem;
+  padding: 0.55rem 0.85rem 0.65rem;
+  border: 1px solid #cbd5e1;
+  border-left: 4px solid #64748b; /* slate — distinct from the code cell's blue */
+  border-radius: 0.25rem;
+  background: #e2e8f0;
+}
+
+/* A small uppercase "Output" tag at the top of each result panel. */
+[data-name="outputs-container"]::before {
+  content: "Output";
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+/* Let the panel background show through the individual output nodes. */
+[data-name="outputs-container"] pre.jupyter-output,
+[data-name="outputs-container"] .myst-jp-safe-output-text {
+  background: transparent;
+}
+
+/* Dark theme (book-theme toggles `.dark` on <html>). */
+html.dark [data-name="outputs-container"] {
+  border-color: #334155;
+  border-left-color: #94a3b8;
+  background: #1e293b;
+}
+
+html.dark [data-name="outputs-container"]::before {
+  color: #94a3b8;
+}

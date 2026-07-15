@@ -39,3 +39,4 @@ site:
   options:
     favicon: ""
     logo_text: rle-python
+    style: styles.css
