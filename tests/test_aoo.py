@@ -396,6 +396,65 @@ class TestMakeAOOGridCached:
 
 
 # ---------------------------------------------------------------------------
+# _remote_file_exists — cache existence checks
+#
+# gs:// caches are read/written via pyarrow's native GCS backend
+# (gpd.read_parquet / to_parquet). The existence check must use the SAME
+# backend, not fsspec — otherwise it silently returns False when gcsfs is not
+# installed, the cache is never detected, and the grid is recomputed (OOM).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestRemoteFileExists:
+    def test_gs_uri_uses_pyarrow_not_fsspec(self, monkeypatch):
+        """gs:// existence works via pyarrow, with no gcsfs/fsspec dependency."""
+        import pyarrow.fs as pafs
+        import fsspec.core
+        from rle.core.aoo import _remote_file_exists
+
+        seen = {}
+
+        class _Info:
+            type = pafs.FileType.File
+
+        class _FakeGCS:
+            def get_file_info(self, path):
+                seen["path"] = path
+                return _Info()
+
+        monkeypatch.setattr(pafs, "GcsFileSystem", lambda *a, **k: _FakeGCS())
+        # Routing gs:// through fsspec would require gcsfs — forbid it.
+        def _no_fsspec(*a, **k):
+            raise AssertionError("gs:// must not go through fsspec")
+        monkeypatch.setattr(fsspec.core, "url_to_fs", _no_fsspec)
+
+        assert _remote_file_exists("gs://bucket/key.parquet") is True
+        assert seen["path"] == "bucket/key.parquet"  # gs:// prefix stripped
+
+    def test_gs_uri_missing_returns_false(self, monkeypatch):
+        import pyarrow.fs as pafs
+        from rle.core.aoo import _remote_file_exists
+
+        class _Info:
+            type = pafs.FileType.NotFound
+
+        class _FakeGCS:
+            def get_file_info(self, path):
+                return _Info()
+
+        monkeypatch.setattr(pafs, "GcsFileSystem", lambda *a, **k: _FakeGCS())
+        assert _remote_file_exists("gs://bucket/missing.parquet") is False
+
+    def test_local_path_still_works(self, tmp_path):
+        from rle.core.aoo import _remote_file_exists
+        p = tmp_path / "x.parquet"
+        assert _remote_file_exists(str(p)) is False
+        p.write_text("data")
+        assert _remote_file_exists(str(p)) is True
+
+
+# ---------------------------------------------------------------------------
 # AOOGridPolygons base class tests
 # ---------------------------------------------------------------------------
 
