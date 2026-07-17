@@ -47,8 +47,20 @@ _AOO_INTERSECTION_CHUNK = 100_000
 
 def _remote_file_exists(path: str) -> bool:
     """Check if a file exists, supporting gs:// URIs and local paths."""
-    import fsspec
+    path = str(path)
+    if path.startswith("gs://"):
+        # Use pyarrow's native GCS backend — the same one gpd.read_parquet /
+        # to_parquet use to read and write gs:// caches. Routing through fsspec
+        # here would silently return False whenever gcsfs is not installed,
+        # so the cache would never be detected and the grid recomputed.
+        try:
+            from pyarrow.fs import GcsFileSystem, FileType
+            info = GcsFileSystem().get_file_info(path[len("gs://"):])
+            return info.type != FileType.NotFound
+        except Exception:
+            return False
     try:
+        import fsspec
         fs, fpath = fsspec.core.url_to_fs(path)
         return fs.exists(fpath)
     except Exception:
