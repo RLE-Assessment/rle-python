@@ -38,6 +38,12 @@ from rle.core.ecosystems import (
 # AOO grid cell size in meters (10 x 10 km)
 AOO_CELL_SIZE_M = 10_000
 
+# Number of (grid cell, ecosystem feature) candidate pairs whose intersections
+# are materialized at once in AOOGridVectorLocal._compute. Chunking bounds peak
+# memory for national-scale datasets (millions of pairs) without changing the
+# result. Tunable; larger = fewer Python iterations, more transient memory.
+_AOO_INTERSECTION_CHUNK = 100_000
+
 
 def _remote_file_exists(path: str) -> bool:
     """Check if a file exists, supporting gs:// URIs and local paths."""
@@ -317,55 +323,75 @@ class AOOGridVectorLocal(AOOGrid):
 
     def _compute(self) -> None:
         import pandas as pd
+        import shapely
         from rle.core.aoo_grid import generate_aoo_grid, AOO_CRS, AOO_CELL_SIZE
+
+        empty_schema = [
+            "grid_col", "grid_row", "count_geoms", "count_ecosystems", "geometry"
+        ]
 
         eco = self._ecosystems.load().reset_index(drop=True)
         if eco.crs is not None and not eco.crs.equals("EPSG:4326"):
             eco = eco.to_crs("EPSG:4326")
-        grid = generate_aoo_grid(eco.total_bounds)
 
         eco_col = self._ecosystems.ecosystem_column
+        # Keep only the columns we need — bounds peak memory for national datasets.
+        eco = eco[(["geometry", eco_col] if eco_col is not None else ["geometry"])]
 
-        # Spatial join to find (grid_cell, ecosystem) pairs
-        joined = gpd.sjoin(grid, eco, how="inner", predicate="intersects")
+        grid = generate_aoo_grid(eco.total_bounds)  # EPSG:4326
+
+        # Candidate (grid_cell, ecosystem feature) pairs. Done in EPSG:4326 to
+        # match the historical predicate exactly; index values are positional
+        # since both frames use a 0..n RangeIndex.
+        joined = gpd.sjoin(
+            grid[["geometry"]], eco[["geometry"]],
+            how="inner", predicate="intersects",
+        )
         if joined.empty:
-            self._computed_gdf = gpd.GeoDataFrame(
-                columns=["grid_col", "grid_row", "count_geoms",
-                          "count_ecosystems", "geometry"]
-            )
+            self._computed_gdf = gpd.GeoDataFrame(columns=empty_schema)
             return
+        grid_pos = joined.index.to_numpy()
+        eco_pos = joined["index_right"].to_numpy()
+        del joined
 
-        # Compute intersection areas in equal-area CRS
-        grid_ea = grid.to_crs(AOO_CRS)
-        eco_ea = eco.to_crs(AOO_CRS)
+        # Reproject once to the equal-area CRS for area math, then free the
+        # geographic ecosystem copy (the memory-heavy national vector).
+        grid_geoms = grid.to_crs(AOO_CRS).geometry.to_numpy()
+        eco_geoms = eco.to_crs(AOO_CRS).geometry.to_numpy()
+        eco_values = eco[eco_col].to_numpy() if eco_col is not None else None
+        del eco
         cell_area = AOO_CELL_SIZE * AOO_CELL_SIZE
 
-        rows = []
-        for grid_idx, eco_idx in zip(joined.index, joined["index_right"]):
-            isect = grid_ea.geometry.iloc[grid_idx].intersection(
-                eco_ea.geometry.iloc[eco_idx]
-            )
-            if isect.is_empty:
+        # Vectorized intersection areas, chunked to bound the transient count of
+        # materialized intersection geometries. Mirrors the historical rule of
+        # keeping every non-empty intersection (boundary touches included).
+        frames = []
+        for start in range(0, len(grid_pos), _AOO_INTERSECTION_CHUNK):
+            gsel = grid_pos[start:start + _AOO_INTERSECTION_CHUNK]
+            esel = eco_pos[start:start + _AOO_INTERSECTION_CHUNK]
+            inter = shapely.intersection(grid_geoms[gsel], eco_geoms[esel])
+            keep = ~shapely.is_empty(inter)
+            if not keep.any():
                 continue
-            fraction = isect.area / cell_area
-            row = {"grid_idx": grid_idx, "eco_idx": eco_idx, "fraction": fraction}
+            chunk = {
+                "grid_idx": gsel[keep],
+                "fraction": shapely.area(inter[keep]) / cell_area,
+            }
             if eco_col is not None:
-                row["ecosystem"] = eco.iloc[eco_idx][eco_col]
-            rows.append(row)
+                chunk["ecosystem"] = eco_values[esel[keep]]
+            frames.append(pd.DataFrame(chunk))
 
-        if not rows:
-            self._computed_gdf = gpd.GeoDataFrame(
-                columns=["grid_col", "grid_row", "count_geoms",
-                          "count_ecosystems", "geometry"]
-            )
+        if not frames:
+            self._computed_gdf = gpd.GeoDataFrame(columns=empty_schema)
             return
-
-        fractions = pd.DataFrame(rows)
+        fractions = pd.concat(frames, ignore_index=True)
 
         # Summary counts per grid cell
         summary = fractions.groupby("grid_idx").agg(
-            count_geoms=("eco_idx", "count"),
-            count_ecosystems=("ecosystem", "nunique") if eco_col else ("eco_idx", "count"),
+            count_geoms=("fraction", "count"),
+            count_ecosystems=(
+                ("ecosystem", "nunique") if eco_col else ("fraction", "count")
+            ),
         )
 
         # Build result with grid geometry

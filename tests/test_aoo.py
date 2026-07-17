@@ -22,7 +22,9 @@ from rle.core.ecosystems import (
     Ecosystems,
     EcosystemKind,
     EcosystemsFile,
+    EcosystemsGeoDataFrame,
 )
+from rle.core.aoo_grid import AOO_CRS, AOO_CELL_SIZE
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +236,102 @@ class TestAOOGridGeoJSON:
         aoo = AOOGrid.from_file(GEOJSON_PATH, ecosystem_column='ECO_NAME').compute()
         polygons = make_aoo_polygons(aoo).compute()
         assert polygons.polygon_count > 0
+
+
+# ---------------------------------------------------------------------------
+# Characterization tests for AOOGridVectorLocal._compute
+#
+# These lock the exact output contract so the vectorized/low-memory refactor
+# of _compute cannot silently change any assessment number.
+# ---------------------------------------------------------------------------
+
+GOLDEN_PATH = (
+    Path(__file__).parent / "test_data" / "aoo_grid_null_island_golden.parquet"
+)
+
+
+def _area_ea(geom) -> float:
+    """Area of a single EPSG:4326 geometry in the AOO equal-area CRS (m²)."""
+    return (
+        gpd.GeoDataFrame(geometry=[geom], crs="EPSG:4326")
+        .to_crs(AOO_CRS)
+        .geometry.area.iloc[0]
+    )
+
+
+@pytest.mark.unit
+class TestAOOGridVectorLocalCompute:
+    """Byte-level and semantic characterization of _compute output."""
+
+    def test_matches_golden_snapshot(self):
+        """Output must equal the committed golden snapshot exactly."""
+        from geopandas.testing import assert_geodataframe_equal
+
+        golden = gpd.read_parquet(GOLDEN_PATH)
+        aoo = AOOGrid.from_file(GEOJSON_PATH, ecosystem_column="ECO_NAME").compute()
+        result = aoo.grid_cells
+
+        assert list(result.columns) == list(golden.columns)
+        assert result.crs == golden.crs
+        assert_geodataframe_equal(result, golden, check_dtype=False)
+
+    def test_single_feature_counts_one_per_cell(self):
+        """A single ecosystem feature spanning many cells: every cell counts 1."""
+        from shapely.geometry import box
+
+        # ~55 km box near (0.5, 0.5) — spans several 10 km cells, away from origin.
+        feature = box(0.30, 0.30, 0.80, 0.80)
+        gdf = gpd.GeoDataFrame(
+            {"ECO_NAME": ["eco_solo"], "geometry": [feature]}, crs="EPSG:4326"
+        )
+        eco = EcosystemsGeoDataFrame(gdf, ecosystem_column="ECO_NAME")
+        cells = AOOGridVectorLocal(eco).compute().grid_cells
+
+        assert (cells["count_geoms"] == 1).all()
+        assert (cells["count_ecosystems"] == 1).all()
+        assert "eco_solo" in cells.columns
+        # Fractional area is conserved: sum over cells == feature_area / cell_area.
+        expected = _area_ea(feature) / (AOO_CELL_SIZE * AOO_CELL_SIZE)
+        assert cells["eco_solo"].sum() == pytest.approx(expected, rel=1e-6)
+
+    def test_same_ecosystem_fractions_sum_in_one_cell(self):
+        """Two overlapping features of one ecosystem in a cell: fractions add."""
+        from shapely.geometry import box
+
+        # Two overlapping small boxes near (0.5, 0.5): both land in the SAME
+        # 10 km cell (well inside cell [50000, 60000] in the equal-area CRS).
+        a = box(0.500, 0.500, 0.502, 0.502)
+        b = box(0.501, 0.501, 0.503, 0.503)
+        # A different ecosystem placed in a DIFFERENT cell (~0.4°).
+        c = box(0.400, 0.400, 0.402, 0.402)
+        gdf = gpd.GeoDataFrame(
+            {"ECO_NAME": ["eco_x", "eco_x", "eco_y"], "geometry": [a, b, c]},
+            crs="EPSG:4326",
+        )
+        eco = EcosystemsGeoDataFrame(gdf, ecosystem_column="ECO_NAME")
+        cells = AOOGridVectorLocal(eco).compute().grid_cells
+
+        # eco_x occupies exactly one cell, hit by both features.
+        eco_x_cells = cells[cells["eco_x"] > 0]
+        assert len(eco_x_cells) == 1
+        row = eco_x_cells.iloc[0]
+        assert row["count_geoms"] == 2  # both features counted
+        assert row["count_ecosystems"] == 1  # both are eco_x
+        # Fractions summed (overlap counted twice, matching per-feature summation).
+        expected = (_area_ea(a) + _area_ea(b)) / (AOO_CELL_SIZE * AOO_CELL_SIZE)
+        assert row["eco_x"] == pytest.approx(expected, rel=1e-6)
+
+    def test_chunked_intersection_matches_golden(self, monkeypatch):
+        """Chunking the intersection must not change the result (chunk size 1)."""
+        from geopandas.testing import assert_geodataframe_equal
+        import rle.core.aoo as aoo_module
+
+        # raising=True: fails until the chunk constant exists (drives the refactor).
+        monkeypatch.setattr(aoo_module, "_AOO_INTERSECTION_CHUNK", 1)
+
+        golden = gpd.read_parquet(GOLDEN_PATH)
+        aoo = AOOGrid.from_file(GEOJSON_PATH, ecosystem_column="ECO_NAME").compute()
+        assert_geodataframe_equal(aoo.grid_cells, golden, check_dtype=False)
 
 
 # ---------------------------------------------------------------------------
