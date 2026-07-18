@@ -46,6 +46,48 @@ class TestEcosystemsGeoParquet:
         eco = EcosystemsGeoParquet("/fake/path.parquet", ecosystem_column='ECO_NAME')
         assert eco.kind == EcosystemKind.VECTOR_LOCAL
 
+    @staticmethod
+    def _fixture(tmp_path):
+        from shapely.geometry import box
+        gdf = gpd.GeoDataFrame(
+            {
+                "ECO_NAME": ["a", "a", "b", "c"],
+                "geometry": [box(i, i, i + 1, i + 1) for i in range(4)],
+            },
+            crs="EPSG:4326",
+        )
+        p = tmp_path / "eco.parquet"
+        gdf.to_parquet(p)
+        return p
+
+    def test_filter_pushdown_avoids_full_load(self, tmp_path):
+        """Exact-match filter reads only matching rows — never full-loads."""
+        p = self._fixture(tmp_path)
+        eco = EcosystemsGeoParquet(str(p), ecosystem_column="ECO_NAME")
+        filtered = eco.filter("a")
+        assert filtered.size() == 2
+        assert set(filtered.load()["ECO_NAME"]) == {"a"}
+        # The source parquet must not have been fully materialized/cached.
+        assert eco._cached is None
+
+    def test_filter_pushdown_matches_in_memory(self, tmp_path):
+        """Pushdown filter returns the same rows as a full-load + mask."""
+        from geopandas.testing import assert_geodataframe_equal
+        p = self._fixture(tmp_path)
+        ref = gpd.read_parquet(p)
+        ref = ref[ref["ECO_NAME"] == "a"].reset_index(drop=True)
+        eco = EcosystemsGeoParquet(str(p), ecosystem_column="ECO_NAME")
+        got = eco.filter("a").load().reset_index(drop=True)
+        assert_geodataframe_equal(got, ref, check_dtype=False)
+
+    def test_filter_regex_falls_back_to_in_memory(self, tmp_path):
+        """Regex filtering can't be pushed down — falls back to a full load."""
+        p = self._fixture(tmp_path)
+        eco = EcosystemsGeoParquet(str(p), ecosystem_column="ECO_NAME")
+        filtered = eco.filter("a", regex=True)
+        assert filtered.size() == 2
+        assert eco._cached is not None  # full load happened
+
 
 @pytest.mark.unit
 class TestEcosystemsCOG:
