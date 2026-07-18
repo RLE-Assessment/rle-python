@@ -667,17 +667,48 @@ class EcosystemsGeoParquet(Ecosystems):
                          ecosystem_name_column=ecosystem_name_column,
                          functional_group_column=functional_group_column)
 
-    def _load(self):
+    def _read(self, *, filters=None, columns=None):
+        """Read the parquet, optionally pushing a predicate / column set down.
+
+        ``gs://`` uses pyarrow's native GCS backend (row-group pruning via range
+        reads, and no gcsfs dependency); other remote schemes use fsspec; local
+        paths read directly. ``filters`` is a pyarrow DNF predicate, e.g.
+        ``[(column, "==", value)]``.
+        """
         import geopandas as gpd
 
-        if isinstance(self._data, str) and self._data.startswith(
-            ("http://", "https://", "gs://", "s3://", "az://")
+        data = self._data
+        if isinstance(data, str) and data.startswith("gs://"):
+            return gpd.read_parquet(data, filters=filters, columns=columns)
+        if isinstance(data, str) and data.startswith(
+            ("http://", "https://", "s3://", "az://")
         ):
             import fsspec
 
-            with fsspec.open(self._data, "rb") as f:
-                return gpd.read_parquet(f)
-        return gpd.read_parquet(self._data)
+            with fsspec.open(data, "rb") as f:
+                return gpd.read_parquet(f, filters=filters, columns=columns)
+        return gpd.read_parquet(data, filters=filters, columns=columns)
+
+    def _load(self):
+        return self._read()
+
+    def filter(self, pattern: str, *, regex: bool = False) -> "Ecosystems":
+        """Filter by ecosystem value, pushing exact matches down to the parquet.
+
+        For an exact match on a not-yet-loaded parquet, only the matching rows
+        are read (pyarrow predicate pushdown), so a large national file is never
+        fully materialized. Regex matches and already-loaded data fall back to
+        the in-memory base implementation.
+        """
+        if not regex and self._cached is None and self.ecosystem_column is not None:
+            gdf = self._read(filters=[(self.ecosystem_column, "==", pattern)])
+            return EcosystemsGeoDataFrame(
+                gdf,
+                ecosystem_column=self.ecosystem_column,
+                ecosystem_name_column=self.ecosystem_name_column,
+                functional_group_column=self.functional_group_column,
+            )
+        return super().filter(pattern, regex=regex)
 
 
 class EcosystemsGeoDataFrame(Ecosystems):
