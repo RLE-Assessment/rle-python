@@ -43,6 +43,14 @@ from rle.core.aoo import (
     slugify_ecosystem_name,
 )
 from rle.core.registry import BackendInfo, iter_backends, list_backends
+from rle.core.rle import (
+    rle_categories,
+    rle_criteria,
+    rle_category,
+    criterion_b_status,
+    CRITERION_B1_EOO_KM2,
+    CRITERION_B2_AOO_CELLS,
+)
 
 __all__ = [
     "__version__",
@@ -74,4 +82,11 @@ __all__ = [
     "BackendInfo",
     "iter_backends",
     "list_backends",
+    # Red List categories & Criterion B assessment
+    "rle_categories",
+    "rle_criteria",
+    "rle_category",
+    "criterion_b_status",
+    "CRITERION_B1_EOO_KM2",
+    "CRITERION_B2_AOO_CELLS",
 ]
